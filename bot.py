@@ -28,8 +28,7 @@ def ask_groq(prompt):
         return f"AI Error: {e}"
 
 def get_gold_data(interval, range_period):
-    try:
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/GC%3DF?interval={interval}&range={range_period}"
+    try:"https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD%3DX?interval={interval}&range={range_period}"}"
         r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
         data = r.json()["chart"]["result"][0]
         closes = [c for c in data["indicators"]["quote"][0]["close"] if c is not None]
