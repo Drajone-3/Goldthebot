@@ -12,7 +12,7 @@ def ask_groq(prompt):
         r = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Authorization": "Bearer " + GROQ_API_KEY,
                 "Content-Type": "application/json"
             },
             json={
@@ -25,16 +25,17 @@ def ask_groq(prompt):
         )
         return r.json()["choices"][0]["message"]["content"]
     except Exception as e:
-        return f"AI Error: {e}"
+        return "AI Error: " + str(e)
 
 def get_gold_data(interval, range_period):
-    try:"https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD%3DX?interval={interval}&range={range_period}"}"
+    try:
+        base = "https://query1.finance.yahoo.com/v8/finance/chart/XAUUSD%3DX"
+        url = base + "?interval=" + interval + "&range=" + range_period
         r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
         data = r.json()["chart"]["result"][0]
         closes = [c for c in data["indicators"]["quote"][0]["close"] if c is not None]
         highs  = [h for h in data["indicators"]["quote"][0]["high"]  if h is not None]
         lows   = [l for l in data["indicators"]["quote"][0]["low"]   if l is not None]
-        volumes= [v for v in data["indicators"]["quote"][0]["volume"] if v is not None]
         if closes:
             avg_range = sum([highs[i]-lows[i] for i in range(-10,0)]) / 10
             last_range = highs[-1] - lows[-1]
@@ -80,21 +81,22 @@ def build_mtf_summary(mtf):
     for tf, d in mtf.items():
         if d:
             arrow = "UP" if d["change"] >= 0 else "DOWN"
-            text += f"{tf}: ${d['price']} {arrow} {d['change']:+.2f} | Vol:{d['volatility']} | Range:{d['range']}\n"
+            text += tf + ": $" + str(d["price"]) + " " + arrow + " " + str(d["change"]) + " | Vol:" + d["volatility"] + " | Range:" + str(d["range"]) + "\n"
         else:
-            text += f"{tf}: Unavailable\n"
+            text += tf + ": Unavailable\n"
     return text
 
 def get_session():
     hour = datetime.now(timezone.utc).hour
+    wat = hour + 1
     if 7 <= hour < 12:
-        return "London Open (High Activity)"
+        return "London Open (High Activity) - " + str(wat) + ":00 WAT"
     elif 12 <= hour < 16:
-        return "London/NY Overlap (Best Session)"
+        return "London/NY Overlap (Best Session) - " + str(wat) + ":00 WAT"
     elif 16 <= hour < 21:
-        return "NY Session"
+        return "NY Session - " + str(wat) + ":00 WAT"
     else:
-        return "Asian Session (Low Activity)"
+        return "Asian Session (Low Activity) - " + str(wat) + ":00 WAT"
 
 @bot.message_handler(commands=["start", "help"])
 def start(msg):
@@ -104,7 +106,7 @@ def start(msg):
         "SIGNALS:\n"
         "/signal - Full combined signal\n"
         "/smart - $15 to $20 smart entry\n"
-        "/volatile - Volatility alert analysis\n\n"
+        "/volatile - Volatility analysis\n\n"
         "TIMEFRAMES:\n"
         "/m1  - 1 min signal\n"
         "/m5  - 5 min signal\n"
@@ -122,16 +124,13 @@ def start(msg):
 
 @bot.message_handler(commands=["session"])
 def session(msg):
-    s = get_session()
-    hour = datetime.now(timezone.utc).hour
     bot.reply_to(msg,
-        f"Current Session: {s}\n"
-        f"UTC Time: {hour}:00\n"
-        f"WAT Time: {hour+1}:00\n\n"
+        "Current Session: " + get_session() + "\n\n"
         "Best sessions for gold:\n"
         "London Open: 8AM-12PM WAT\n"
-        "London/NY: 2PM-5PM WAT\n\n"
-        "Avoid: 30 mins before CPI, NFP, FOMC"
+        "London/NY Overlap: 2PM-5PM WAT\n\n"
+        "Avoid: 30 mins before CPI, NFP, FOMC\n"
+        "Next FOMC: May 6-7, Jun 17-18"
     )
 
 @bot.message_handler(commands=["price"])
@@ -140,13 +139,16 @@ def price(msg):
     d = get_gold_data("1m", "1d")
     if d:
         arrow = "UP" if d["change"] >= 0 else "DOWN"
+        now = datetime.now(timezone.utc)
+        wat = now.hour + 1
         bot.reply_to(msg,
-            f"XAU/USD Live Price\n"
-            f"${d['price']:,.2f} USD/oz\n"
-            f"{arrow} {d['change']:+.2f} ({d['pct']:+.3f}%)\n"
-            f"Volatility: {d['volatility']}\n"
-            f"Session: {get_session()}\n"
-            f"Time: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+            "XAU/USD Live Price\n"
+            "$" + str(d["price"]) + " USD/oz\n"
+            "" + arrow + " " + str(d["change"]) + " (" + str(d["pct"]) + "%)\n"
+            "High: $" + str(d["high"]) + " | Low: $" + str(d["low"]) + "\n"
+            "Volatility: " + d["volatility"] + "\n"
+            "Session: " + get_session() + "\n"
+            "Time: " + str(wat) + ":" + now.strftime("%M") + " WAT"
         )
     else:
         bot.reply_to(msg, "Could not fetch price. Try again.")
@@ -157,107 +159,64 @@ def volatile(msg):
     mtf = get_all_mtf()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     mtf_text = build_mtf_summary(mtf)
-    prompt = f"""You are a professional XAU/USD volatility analyst.
-Time: {now}
-Session: {get_session()}
-
-Multi-Timeframe Volatility Data:
-{mtf_text}
-
-Analyze volatility and give:
-
-VOLATILITY REPORT - XAU/USD
-Time: {now}
-Session: {get_session()}
-
-OVERALL VOLATILITY: [HIGH / NORMAL / LOW]
-
-VOLATILITY ANALYSIS:
-[2 sentences on current volatility across timeframes]
-
-IS NOW A GOOD TIME TO TRADE?
-[YES / NO / WAIT] - [reason]
-
-IF HIGH VOLATILITY - BEST ENTRIES:
-Primary Entry: $[level] [direction]
-Aggressive Entry: $[level] [direction]
-Conservative Entry: $[level] [direction]
-
-VOLATILITY PLAY SETUP:
-Signal: [BUY/SELL]
-Entry: $[level]
-Stop Loss: $[level] (wider for volatility)
-TP1: $[level]
-TP2: $[level]
-
-DANGER ZONES: [price levels to avoid]
-
-RECOMMENDATION: [One clear action sentence]"""
+    prompt = (
+        "You are a professional XAU/USD volatility analyst.\n"
+        "Time: " + now + "\n"
+        "Session: " + get_session() + "\n\n"
+        "Multi-Timeframe Volatility Data:\n" + mtf_text + "\n"
+        "Analyze volatility and give:\n\n"
+        "VOLATILITY REPORT - XAU/USD\n"
+        "OVERALL VOLATILITY: [HIGH / NORMAL / LOW]\n"
+        "VOLATILITY ANALYSIS: [2 sentences]\n"
+        "IS NOW A GOOD TIME TO TRADE? [YES / NO / WAIT] - reason\n\n"
+        "VOLATILITY PLAY SETUP:\n"
+        "Signal: [BUY/SELL]\n"
+        "Entry: $[level]\n"
+        "Stop Loss: $[level]\n"
+        "TP1: $[level]\n"
+        "TP2: $[level]\n\n"
+        "DANGER ZONES: [levels to avoid]\n"
+        "RECOMMENDATION: [One clear sentence]"
+    )
     result = ask_groq(prompt)
     bot.reply_to(msg, result)
 
 @bot.message_handler(commands=["smart"])
 def smart(msg):
-    bot.reply_to(msg, "Running smart entry analysis for $15 to $20 target... Please wait")
+    bot.reply_to(msg, "Running smart entry for $15 to $20 target... Please wait 20 seconds")
     mtf = get_all_mtf()
     web = get_web_signals()
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     mtf_text = build_mtf_summary(mtf)
     signals_text = "\n".join(web[:4]) if web else "None"
     d1 = get_gold_data("1m", "1d")
-    current_price = d1["price"] if d1 else "N/A"
-
-    prompt = f"""You are an elite XAU/USD scalp trader. 
-Time: {now}
-Session: {get_session()}
-Current Price: ${current_price}
-
-All Timeframe Data:
-{mtf_text}
-
-Web Signals:
-{signals_text}
-
-The trader wants to risk $15 to make $20 profit on gold using 0.01-0.02 lot size.
-That means roughly 13-20 pip stop loss and 17-25 pip take profit on 0.01 lot.
-
-Give the SMARTEST highest probability entry:
-
-SMART ENTRY - $15 TO $20 TARGET
-Time: {now}
-Current Price: ${current_price}
-Session: {get_session()}
-
-SIGNAL: [STRONG BUY / BUY / SELL / STRONG SELL]
-Confidence: [%]
-
-NORMAL ENTRY:
-Entry Price: $[level]
-Stop Loss: $[level] (~[pips] pips = ~$15 risk on 0.01 lot)
-Take Profit: $[level] (~[pips] pips = ~$20 profit on 0.01 lot)
-Risk/Reward: 1:[ratio]
-
-BEST ENTRY (High Probability):
-Wait for price to reach: $[level]
-Confirmation signal: [what to look for]
-Entry after: [condition]
-Stop Loss: $[level]
-Take Profit: $[level]
-
-VOLATILITY ENTRY (If market is moving fast):
-Breakout level: $[level]
-Entry on break of: $[level]
-Stop Loss: $[level]
-Target: $[level]
-
-TIMEFRAME CONFLUENCE: [which TFs agree]
-WEB SENTIMENT: [Bullish/Bearish/Mixed]
-
-DO NOT TRADE IF: [conditions to avoid]
-
-BEST TIME TO ENTER TODAY: [specific time in WAT]
-
-VERDICT: [One sentence - enter now or wait and why]"""
+    current_price = str(d1["price"]) if d1 else "N/A"
+    prompt = (
+        "You are an elite XAU/USD scalp trader.\n"
+        "Time: " + now + "\n"
+        "Session: " + get_session() + "\n"
+        "Current Price: $" + current_price + "\n\n"
+        "All Timeframe Data:\n" + mtf_text + "\n"
+        "Web Signals:\n" + signals_text + "\n\n"
+        "Trader wants to risk $15 to make $20 using 0.01-0.02 lot size.\n\n"
+        "SMART ENTRY - $15 TO $20 TARGET\n"
+        "SIGNAL: [STRONG BUY / BUY / SELL / STRONG SELL]\n"
+        "Confidence: [%]\n\n"
+        "NORMAL ENTRY:\n"
+        "Entry Price: $[level]\n"
+        "Stop Loss: $[level] (~$15 risk on 0.01 lot)\n"
+        "Take Profit: $[level] (~$20 profit on 0.01 lot)\n"
+        "Risk/Reward: 1:[ratio]\n\n"
+        "BEST ENTRY (High Probability):\n"
+        "Wait for: $[level]\n"
+        "Confirmation: [what to look for]\n"
+        "Stop Loss: $[level]\n"
+        "Take Profit: $[level]\n\n"
+        "TIMEFRAME CONFLUENCE: [which TFs agree]\n"
+        "DO NOT TRADE IF: [conditions]\n"
+        "BEST TIME TODAY (WAT): [time]\n"
+        "VERDICT: [One sentence]"
+    )
     result = ask_groq(prompt)
     bot.reply_to(msg, result)
 
@@ -269,67 +228,56 @@ def signal(msg):
     mtf_text = build_mtf_summary(mtf)
     signals_text = "\n".join(web[:5]) if web else "None"
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    prompt = f"""You are a professional XAU/USD gold trader and analyst.
-Time: {now}
-Session: {get_session()}
-
-Multi-Timeframe Data:
-{mtf_text}
-
-Web Trader Signals:
-{signals_text}
-
-Give ONE combined signal:
-
-SIGNAL: [STRONG BUY / BUY / NEUTRAL / SELL / STRONG SELL]
-Current Price: $[price]
-Entry Zone: $[range]
-Stop Loss: $[level] (~[pips] pips)
-Take Profit 1: $[level] (~[pips] pips)
-Take Profit 2: $[level] (~[pips] pips)
-Risk/Reward: 1:[ratio]
-
-REASON:
-[3 sentences covering all timeframes and web sentiment]
-
-WEB SENTIMENT: [BULLISH/BEARISH/MIXED]
-VOLATILITY: [HIGH/NORMAL/LOW]
-KEY RISK: [One sentence]
-VALID FOR: [timeframe]
-BEST SESSION: {get_session()}
-
-Note: 0.01 lots, $5-10 profit target, $5 max loss."""
+    prompt = (
+        "You are a professional XAU/USD gold trader.\n"
+        "Time: " + now + "\n"
+        "Session: " + get_session() + "\n\n"
+        "Multi-Timeframe Data:\n" + mtf_text + "\n"
+        "Web Trader Signals:\n" + signals_text + "\n\n"
+        "Give ONE combined signal:\n\n"
+        "SIGNAL: [STRONG BUY / BUY / NEUTRAL / SELL / STRONG SELL]\n"
+        "Current Price: $[price]\n"
+        "Entry Zone: $[range]\n"
+        "Stop Loss: $[level] (~[pips] pips)\n"
+        "Take Profit 1: $[level]\n"
+        "Take Profit 2: $[level]\n"
+        "Risk/Reward: 1:[ratio]\n\n"
+        "REASON: [3 sentences]\n"
+        "WEB SENTIMENT: [BULLISH/BEARISH/MIXED]\n"
+        "VOLATILITY: [HIGH/NORMAL/LOW]\n"
+        "KEY RISK: [One sentence]\n"
+        "VALID FOR: [timeframe]\n\n"
+        "Note: 0.01 lots, $5-10 profit target, $5 max loss."
+    )
     result = ask_groq(prompt)
     bot.reply_to(msg, result)
 
 def single_tf(msg, tf, interval, range_p):
-    bot.reply_to(msg, f"Analyzing {tf} timeframe...")
+    bot.reply_to(msg, "Analyzing " + tf + " timeframe...")
     d = get_gold_data(interval, range_p)
     if not d:
-        bot.reply_to(msg, f"Could not fetch {tf} data.")
+        bot.reply_to(msg, "Could not fetch " + tf + " data.")
         return
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    prompt = f"""You are a professional XAU/USD analyst.
-Time: {now}
-Timeframe: {tf}
-Price: ${d['price']}
-Change: {d['change']:+.2f} ({d['pct']:+.3f}%)
-High: ${d['high']} | Low: ${d['low']}
-Volatility: {d['volatility']} | Range: {d['range']} pips
-
-Give a {tf} signal:
-
-TIMEFRAME: {tf}
-SIGNAL: [BUY / SELL / NEUTRAL]
-Entry: $[level]
-Stop Loss: $[level]
-Take Profit: $[level]
-Risk/Reward: 1:[ratio]
-Volatility: {d['volatility']}
-
-REASON: [2 sentences]
-VALID FOR: [time]
-NOTE: 0.01 lots, $5-10 profit, $5 max loss."""
+    prompt = (
+        "You are a professional XAU/USD analyst.\n"
+        "Time: " + now + "\n"
+        "Timeframe: " + tf + "\n"
+        "Price: $" + str(d["price"]) + "\n"
+        "Change: " + str(d["change"]) + " (" + str(d["pct"]) + "%)\n"
+        "High: $" + str(d["high"]) + " | Low: $" + str(d["low"]) + "\n"
+        "Volatility: " + d["volatility"] + "\n\n"
+        "Give a " + tf + " signal:\n\n"
+        "TIMEFRAME: " + tf + "\n"
+        "SIGNAL: [BUY / SELL / NEUTRAL]\n"
+        "Entry: $[level]\n"
+        "Stop Loss: $[level]\n"
+        "Take Profit: $[level]\n"
+        "Risk/Reward: 1:[ratio]\n\n"
+        "REASON: [2 sentences]\n"
+        "VALID FOR: [time]\n"
+        "NOTE: 0.01 lots, $5-10 profit, $5 max loss."
+    )
     result = ask_groq(prompt)
     bot.reply_to(msg, result)
 
@@ -364,66 +312,54 @@ def news(msg):
     if signals:
         text = "Web Trader Signals\n\n"
         for i, s in enumerate(signals, 1):
-            text += f"{i}. {s}\n\n"
+            text += str(i) + ". " + s + "\n\n"
         bot.reply_to(msg, text)
     else:
         bot.reply_to(msg, "Could not fetch signals. Try again.")
 
 @bot.message_handler(commands=["analyze"])
 def analyze(msg):
-    bot.reply_to(msg, "Running deep analysis across all timeframes... Please wait")
+    bot.reply_to(msg, "Running deep analysis... Please wait 20 seconds")
     mtf = get_all_mtf()
     web = get_web_signals()
     mtf_text = build_mtf_summary(mtf)
     signals_text = "\n".join(web[:4]) if web else "None"
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    prompt = f"""You are a senior XAU/USD analyst.
-Time: {now}
-Session: {get_session()}
-
-All Timeframes:
-{mtf_text}
-
-Web Signals:
-{signals_text}
-
-DEEP ANALYSIS - XAU/USD
-Time: {now}
-Session: {get_session()}
-
-MARKET STRUCTURE:
-[Overall trend from D1 and H4]
-
-TIMEFRAME CONFLUENCE:
-D1: [trend + key level]
-H4: [trend + structure]
-H1: [momentum]
-M15: [short term bias]
-M5: [entry timing]
-M1: [micro entry]
-
-KEY LEVELS:
-Major Resistance: $[level]
-Minor Resistance: $[level]
-Current: $[price]
-Minor Support: $[level]
-Major Support: $[level]
-
-VOLATILITY STATUS: [HIGH/NORMAL/LOW]
-WEB SENTIMENT: [Bullish/Bearish/Mixed]
-
-BEST SETUP:
-Bias: [BULLISH/BEARISH/RANGING]
-Entry: $[level]
-Stop Loss: $[level]
-Target: $[level]
-Session: {get_session()}
-
-FINAL VERDICT: [One clear action]"""
+    prompt = (
+        "You are a senior XAU/USD analyst.\n"
+        "Time: " + now + "\n"
+        "Session: " + get_session() + "\n\n"
+        "All Timeframes:\n" + mtf_text + "\n"
+        "Web Signals:\n" + signals_text + "\n\n"
+        "DEEP ANALYSIS - XAU/USD\n\n"
+        "MARKET STRUCTURE: [Overall trend from D1 and H4]\n\n"
+        "TIMEFRAME CONFLUENCE:\n"
+        "D1: [trend + key level]\n"
+        "H4: [trend + structure]\n"
+        "H1: [momentum]\n"
+        "M15: [short term bias]\n"
+        "M5: [entry timing]\n"
+        "M1: [micro entry]\n\n"
+        "KEY LEVELS:\n"
+        "Major Resistance: $[level]\n"
+        "Minor Resistance: $[level]\n"
+        "Current: $[price]\n"
+        "Minor Support: $[level]\n"
+        "Major Support: $[level]\n\n"
+        "VOLATILITY STATUS: [HIGH/NORMAL/LOW]\n"
+        "WEB SENTIMENT: [Bullish/Bearish/Mixed]\n\n"
+        "BEST SETUP:\n"
+        "Bias: [BULLISH/BEARISH/RANGING]\n"
+        "Entry: $[level]\n"
+        "Stop Loss: $[level]\n"
+        "Target: $[level]\n\n"
+        "FINAL VERDICT: [One clear action]"
+    )
     result = ask_groq(prompt)
     bot.reply_to(msg, result)
 
 print("Jones X Operations Gold Bot is running...")
 print("M1 M5 M15 H1 H4 D1 + Smart Entry + Volatility")
 bot.infinity_polling()
+            
           
